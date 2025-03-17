@@ -1,0 +1,218 @@
+// In here we connect senors,and prisone door control
+
+#include <WiFi.h>
+#include <FirebaseESP32.h>
+#include <Wire.h>
+#include "MAX30105.h"
+#include <OneWire.h>
+#include <DallasTemperature.h>//For DS18B20 temperature sensor.
+#include <DHT.h>
+#include <ESP32Servo.h>
+
+// Wi-Fi Credentials
+#define WIFI_SSID "xxxx"
+#define WIFI_PASSWORD "xxxxxxxx"
+
+
+// Firebase Credentials
+#define FIREBASE_HOST "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+#define FIREBASE_AUTH "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+// Firebase Objects
+FirebaseData firebaseData;
+FirebaseConfig config;
+FirebaseAuth auth;
+
+// Servo Motor Pin
+#define SERVO_PIN 23
+Servo doorServo;
+String lastDoorState = "";
+
+// PIR, Fire, and Smoke Sensors
+#define PIR_SENSOR 14  
+#define LED_MOTION 2   
+#define FIRE_SENSOR 35  
+#define LED_FIRE 4      
+#define SMOKE_SENSOR 34 
+#define LED_SMOKE 5     
+
+// MAX30102 Pulse Oximeter
+MAX30105 particleSensor;
+
+// DS18B20 Temperature Sensor (GPIO 16)
+#define ONE_WIRE_BUS 16
+OneWire oneWire(ONE_WIRE_BUS);
+DallasTemperature sensors(&oneWire);
+
+// DHT11 Temperature & Humidity Sensor (GPIO 15)
+#define DHTPIN 15
+#define DHTTYPE DHT11
+DHT dht(DHTPIN, DHTTYPE);
+
+int previousFireValue = 0;
+int previousSmokeValue = 0;
+
+void connectWiFi() {
+    Serial.print("Connecting to WiFi");
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    int attempt = 0;
+    
+    while (WiFi.status() != WL_CONNECTED && attempt < 15) { 
+        delay(1000);
+        Serial.print(".");
+        attempt++;
+    }
+
+    if (WiFi.status() == WL_CONNECTED) {
+        Serial.println("\nConnected to WiFi");
+    } else {
+        Serial.println("\nWiFi Connection Failed! Restarting...");
+        ESP.restart();
+    }
+}
+
+void setup() {
+    Serial.begin(115200);
+    delay(1000);
+    
+    connectWiFi();
+
+    // Firebase Setup
+    config.database_url = FIREBASE_HOST;
+    config.signer.tokens.legacy_token = FIREBASE_AUTH;
+    Firebase.begin(&config, &auth);
+    Firebase.reconnectWiFi(true);
+
+    // Initialize Sensors
+    pinMode(PIR_SENSOR, INPUT);
+    pinMode(LED_MOTION, OUTPUT);
+    pinMode(FIRE_SENSOR, INPUT);
+    pinMode(LED_FIRE, OUTPUT);
+    pinMode(SMOKE_SENSOR, INPUT);
+    pinMode(LED_SMOKE, OUTPUT);
+    
+    Wire.begin();
+    particleSensor.begin(Wire, I2C_SPEED_STANDARD);
+    particleSensor.setup();
+    sensors.begin();
+    dht.begin();
+
+    // Servo Setup
+    doorServo.attach(SERVO_PIN);
+    doorServo.write(0);  // Locked position
+
+    // Ensure Firebase has an initial value
+    Firebase.setString(firebaseData, "/doorState/status", "locked");
+}
+
+void loop() {
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("WiFi Disconnected! Reconnecting...");
+        connectWiFi();
+    }
+
+    // Door Control from Firebase
+    if (Firebase.getString(firebaseData, "/doorState/state")) {
+        String doorState = firebaseData.stringData();
+        if (doorState != lastDoorState) {
+            Serial.print("Door State Changed: ");
+            Serial.println(doorState);
+            
+            if (doorState == "open") {
+                doorServo.write(90); // Open position
+                Serial.println("Door Opened");
+                Firebase.setString(firebaseData, "/doorState/status", "open");
+            } else if (doorState == "locked") {
+                doorServo.write(0); // Locked position
+                Serial.println("Door Locked");
+                Firebase.setString(firebaseData, "/doorState/status", "locked");
+            }
+
+            lastDoorState = doorState;
+        }
+    } else {
+        Serial.println("Firebase Read Error: " + firebaseData.errorReason());
+    }
+
+    // PIR Sensor (Motion Detection)
+    int pirValue = digitalRead(PIR_SENSOR);
+    Serial.print("Motion: "); Serial.println(pirValue);
+    digitalWrite(LED_MOTION, pirValue);
+    if (Firebase.ready()) {
+        Firebase.setInt(firebaseData, "/sensors/motion", pirValue);
+    }
+
+    // Fire Sensor
+    int fireValue = analogRead(FIRE_SENSOR);
+    Serial.print("Fire Sensor: "); Serial.println(fireValue);
+    if (fireValue != previousFireValue && fireValue < 4095) {
+        for (int i = 0; i < 5; i++) {
+            digitalWrite(LED_FIRE, HIGH);
+            delay(500);
+            digitalWrite(LED_FIRE, LOW);
+            delay(500);
+        }
+    }
+    previousFireValue = fireValue;
+    if (Firebase.ready()) {
+        Firebase.setInt(firebaseData, "/sensors/fire", fireValue);
+    }
+
+    // Smoke Sensor
+    int smokeValue = analogRead(SMOKE_SENSOR);
+    Serial.print("Smoke Sensor: "); Serial.println(smokeValue);
+    if (smokeValue != previousSmokeValue && smokeValue < 4095) {
+        for (int i = 0; i < 5; i++) {
+            digitalWrite(LED_SMOKE, HIGH);
+            delay(500);
+            digitalWrite(LED_SMOKE, LOW);
+            delay(500);
+        }
+    }
+    previousSmokeValue = smokeValue;
+    if (Firebase.ready()) {
+        Firebase.setInt(firebaseData, "/sensors/smoke", smokeValue);
+    }
+
+    // Heart Rate Sensor (MAX30102)
+    int heartRate = particleSensor.getIR();
+    if (heartRate < 500) {
+        Serial.println("Warning: Heart rate sensor not detecting properly!");
+        heartRate = 0;
+    }
+    if (Firebase.ready()) {
+        Firebase.setInt(firebaseData, "/SmartJail/HeartRate", heartRate);
+    }
+
+    // DS18B20 Temperature Sensor
+    sensors.requestTemperatures();
+    float temperatureDS18B20 = sensors.getTempCByIndex(0);
+    if (temperatureDS18B20 == -127.00) {
+        Serial.println("Error: DS18B20 not detected!");
+        temperatureDS18B20 = 0;
+    }
+    if (Firebase.ready()) {
+        Firebase.setFloat(firebaseData, "/SmartJail/Temperature_DS18B20", temperatureDS18B20);
+    }
+
+    // DHT11 Temperature & Humidity Sensor
+    float temperatureDHT = dht.readTemperature();
+    float humidityDHT = dht.readHumidity();
+    if (isnan(temperatureDHT) || isnan(humidityDHT)) {
+        Serial.println("Error: Failed to read from DHT11 sensor!");
+        temperatureDHT = 0;
+        humidityDHT = 0;
+    }
+    if (Firebase.ready()) {
+        Firebase.setFloat(firebaseData, "/SmartJail/Temperature_DHT11", temperatureDHT);
+        Firebase.setFloat(firebaseData, "/SmartJail/Humidity_DHT11", humidityDHT);
+    }
+
+    // Print Values
+    Serial.print("Heart Rate: "); Serial.print(heartRate);
+    Serial.print(" | Temp (DS18B20): "); Serial.print(temperatureDS18B20);
+    Serial.print(" | Temp (DHT11): "); Serial.print(temperatureDHT);
+    Serial.print(" | Humidity: "); Serial.println(humidityDHT);
+
+    delay(2000); // Delay to prevent excessive Firebase writes
+}

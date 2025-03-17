@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Jail Monitoring & Door Control</title>
+    
+    <!-- Firebase SDK -->
+    <script type="module">
+        import { initializeApp } from "***************************";
+        import { getDatabase, ref, onValue, set } from "************************************";
+
+        const firebaseConfig = {
+           <!-- use config from firebase-->
+        };
+        
+        const app = initializeApp(firebaseConfig);
+        const database = getDatabase(app);
+
+        function updateSensorData(sensor, elementId) {
+            const sensorRef = ref(database, `/sensors/${sensor}`);
+            onValue(sensorRef, (snapshot) => {
+                const value = snapshot.val();
+                let element = document.getElementById(elementId);
+                element.innerText = value !== null ? value : "No Data";
+            });
+        }
+
+        updateSensorData("motion", "motion");
+        updateSensorData("fire", "fire");
+        updateSensorData("smoke", "smoke");
+        updateSensorData("HeartRate", "heartRate");
+        updateSensorData("Temperature_DS18B20", "tempDS18B20");
+        updateSensorData("Temperature_DHT11", "tempDHT");
+        updateSensorData("Humidity_DHT11", "humidityDHT");
+
+        // Door Control
+        const doorStateRef = ref(database, 'doorState/state');
+        document.addEventListener("DOMContentLoaded", () => {
+            const openBtn = document.getElementById('openBtn');
+            const lockBtn = document.getElementById('lockBtn');
+            const statusText = document.getElementById('status');
+
+            function updateStatus(status) {
+                statusText.innerHTML = `Current Status: <strong>${status}</strong>`;
+                openBtn.disabled = status === "open";
+                lockBtn.disabled = status === "locked";
+            }
+
+            onValue(doorStateRef, (snapshot) => {
+                updateStatus(snapshot.val());
+            });
+
+            openBtn.addEventListener('click', () => set(doorStateRef, 'open'));
+            lockBtn.addEventListener('click', () => set(doorStateRef, 'locked'));
+        });
+
+        // Dummy Prisoner Details (Sri Lanka)
+        document.addEventListener("DOMContentLoaded", () => {
+            document.getElementById('prisoner-name').innerText = "Saman Perera";
+            document.getElementById('prisoner-age').innerText = "35";
+            document.getElementById('prisoner-id').innerText = "SLP-12345";
+            document.getElementById('prisoner-status').innerText = "Under Investigation";
+        });
+
+        // Access Laptop Camera
+        function startCamera() {
+            const videoElement = document.getElementById("cameraFeed");
+
+            navigator.mediaDevices.getUserMedia({ video: true })
+                .then((stream) => {
+                    videoElement.srcObject = stream;
+                })
+                .catch((error) => {
+                    console.error("Error accessing camera:", error);
+                    document.getElementById("cameraError").innerText = "Camera access denied or unavailable.";
+                });
+        }
+
+        window.onload = startCamera;
+    </script>
+    
+    <style>
+        body {
+            font-family: 'Poppins', sans-serif;
+            background: radial-gradient(circle, #141E30, #243B55);
+            color: white;
+            text-align: center;
+        }
+        h2 { text-shadow: 2px 2px 5px cyan; }
+        .container { display: flex; flex-wrap: wrap; justify-content: center; gap: 20px; margin-top: 20px; }
+        .card {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px cyan;
+            transition: transform 0.3s;
+        }
+        .card:hover { transform: scale(1.05); }
+        .sensor-value { font-size: 24px; font-weight: bold; color: orange; }
+        .control-section { margin-top: 30px; }
+        button {
+            padding: 10px 20px;
+            font-size: 18px;
+            margin: 10px;
+            cursor: pointer;
+        }
+        .prisoner-section {
+            margin-top: 30px;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px cyan;
+            background: rgba(255, 255, 255, 0.1);
+        }
+        video {
+            width: 80%;
+            height: 300px;
+            border: 2px solid cyan;
+            border-radius: 10px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h2>Smart Jail Monitoring System</h2>
+
+    <!-- Sensor Data -->
+    <div class="container">
+        <div class="card"><p>Motion Sensor</p><p class="sensor-value" id="motion">Loading...</p></div>
+        <div class="card"><p>Fire Sensor</p><p class="sensor-value" id="fire">Loading...</p></div>
+        <div class="card"><p>Smoke Sensor</p><p class="sensor-value" id="smoke">Loading...</p></div>
+        <div class="card"><p>Heart Rate</p><p class="sensor-value" id="heartRate">Loading...</p></div>
+        <div class="card"><p>Temperature (DS18B20)</p><p class="sensor-value" id="tempDS18B20">Loading...</p></div>
+        <div class="card"><p>Temperature (DHT11)</p><p class="sensor-value" id="tempDHT">Loading...</p></div>
+        <div class="card"><p>Humidity (DHT11)</p><p class="sensor-value" id="humidityDHT">Loading...</p></div>
+    </div>
+
+    <!-- Live Camera Feed -->
+    <h2>Live Prisoner Monitoring</h2>
+    <video id="cameraFeed" autoplay></video>
+    <p id="cameraError" style="color: red;"></p>
+
+    <!-- Prisoner Details -->
+    <h2>Prisoner Details</h2>
+    <div class="prisoner-section">
+        <p><strong>Name:</strong> <span id="prisoner-name">Loading...</span></p>
+        <p><strong>Age:</strong> <span id="prisoner-age">Loading...</span></p>
+        <p><strong>ID:</strong> <span id="prisoner-id">Loading...</span></p>
+        <p><strong>Status:</strong> <span id="prisoner-status">Loading...</span></p>
+    </div>
+
+    <!-- Door Control -->
+    <h2>Prisoner Door Control</h2>
+    <div class="control-section">
+        <button id="openBtn">Open Door</button>
+        <button id="lockBtn">Lock Door</button>
+        <p id="status">Current Status: <strong>Loading...</strong></p>
+    </div>
+	
+	<!-- Access System Button -->
+    <h2>System Access</h2>
+    <div class="control-section">
+        <button id="accessSystemBtn">Access System</button>
+    </div>
+
+    <script>
+        document.getElementById("accessSystemBtn").addEventListener("click", function() {
+            window.open("*********", "_blank");
+        });
+    </script>
+</body>
+</html>

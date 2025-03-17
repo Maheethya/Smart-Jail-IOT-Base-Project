@@ -1,0 +1,116 @@
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <SPI.h>
+#include <MFRC522.h>
+#include <Servo.h>
+
+#define SS_PIN 10
+#define RST_PIN 9
+#define SERVO_PIN 6
+#define LDR_PIN A0  // LDR connected to analog pin A0
+#define LED_PIN 5   // Night light (LED) connected to digital pin 5
+
+
+MFRC522 rfid(SS_PIN, RST_PIN);
+Servo doorServo;
+LiquidCrystal_I2C lcd(0xxx, xx, x); // LCD I2C address (make sure it's correct)
+
+String authorizedUID = "xx xx xx xx"; // Replace with your RFID card's UID
+bool doorOpen = false;
+
+void setup() {
+    Serial.begin(9600);
+    SPI.begin();
+    rfid.PCD_Init();
+
+    lcd.init();      // Initialize LCD
+    lcd.backlight(); // Turn on LCD backlight
+    lcd.setCursor(0, 0);
+    lcd.print("Scan Your Card");
+
+    doorServo.attach(SERVO_PIN);
+    doorServo.write(0); // Keep door initially closed
+
+    pinMode(LED_PIN, OUTPUT); // Set LED pin as an output
+
+    // Additional Debugging lines
+    Serial.println("Setup Complete");
+}
+
+void loop() {
+    // Read the LDR value to determine the ambient light
+    int ldrValue = analogRead(LDR_PIN);
+
+    // If the ambient light is low, turn on the night light (LED)
+    if (ldrValue < 500) {  // You can adjust this threshold based on your setup
+        digitalWrite(LED_PIN, HIGH); // Turn on LED (Night Light)
+    } else {
+        digitalWrite(LED_PIN, LOW);  // Turn off LED (Night Light)
+    }
+
+    if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial()) {
+        return;
+    }
+
+    // Read the UID of the card
+    String cardUID = "";
+    for (byte i = 0; i < rfid.uid.size; i++) {
+        cardUID += String(rfid.uid.uidByte[i], HEX);
+        if (i < rfid.uid.size - 1) {
+            cardUID += " "; // Add space between bytes
+        }
+    }
+
+    Serial.print("Card UID: ");
+    Serial.println(cardUID);
+
+    if (cardUID.equalsIgnoreCase(authorizedUID)) {
+        if (!doorOpen) {
+            openDoor();
+        } else {
+            closeDoor();
+        }
+    } else {
+        accessDenied();
+    }
+
+    rfid.PICC_HaltA();
+    rfid.PCD_StopCrypto1();
+    delay(1000); // Small delay to prevent multiple rapid reads
+}
+
+// Function to open the door
+void openDoor() {
+    Serial.println("Opening Door...");  // Debugging line
+    doorServo.write(90); // Rotate servo to open door (90 degrees)
+    delay(1000); // Give some time for the servo to move to position
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Door Opened");
+    Serial.println("Door Opened");
+    doorOpen = true;
+}
+
+// Function to close the door
+void closeDoor() {
+    Serial.println("Closing Door...");  // Debugging line
+    doorServo.write(0); // Rotate servo to close door (0 degrees)
+    delay(1000); // Give some time for the servo to move to position
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Door Closed");
+    Serial.println("Door Closed");
+    doorOpen = false;
+}
+
+// Function to handle unauthorized access
+void accessDenied() {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Access Denied");
+    Serial.println("Access Denied");
+    delay(2000); // Show "Access Denied" for 2 seconds
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Scan Your Card");
+}
